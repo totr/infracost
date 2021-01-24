@@ -54,7 +54,7 @@ func TestCreateResource(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		actual := createResource(test.data, nil)
+		actual := createResource(test.data, nil, false)
 		assert.Equal(t, test.expected.Name, actual.Name)
 		assert.Equal(t, test.expected.ResourceType, actual.ResourceType)
 		assert.Equal(t, test.expected.IsSkipped, actual.IsSkipped)

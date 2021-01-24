@@ -34,7 +34,7 @@ var arnAttributeMap = map[string]string{
 	"dms_replication_task":     "replication_task_arn",
 }
 
-func createResource(d *schema.ResourceData, u *schema.UsageData) *schema.Resource {
+func createResource(d *schema.ResourceData, u *schema.UsageData, isExisting bool) *schema.Resource {
 	registryMap := GetResourceRegistryMap()
 
 	if registryItem, ok := (*registryMap)[d.Type]; ok {
@@ -43,6 +43,7 @@ func createResource(d *schema.ResourceData, u *schema.UsageData) *schema.Resourc
 				Name:         d.Address,
 				ResourceType: d.Type,
 				Tags:         d.Tags,
+				IsExisting:   isExisting,
 				IsSkipped:    true,
 				NoPrice:      true,
 				SkipMessage:  "Free resource.",
@@ -53,6 +54,7 @@ func createResource(d *schema.ResourceData, u *schema.UsageData) *schema.Resourc
 		if res != nil {
 			res.ResourceType = d.Type
 			res.Tags = d.Tags
+			res.IsExisting = isExisting
 			return res
 		}
 	}
@@ -61,6 +63,7 @@ func createResource(d *schema.ResourceData, u *schema.UsageData) *schema.Resourc
 		Name:         d.Address,
 		ResourceType: d.Type,
 		Tags:         d.Tags,
+		IsExisting:   isExisting,
 		IsSkipped:    true,
 		SkipMessage:  "This resource is not currently supported",
 	}
@@ -78,10 +81,19 @@ func parseJSON(j []byte, u map[string]*schema.UsageData) ([]*schema.Resource, er
 	conf := p.Get("configuration.root_module")
 	vars := p.Get("variables")
 
-	vals := p.Get("planned_values.root_module")
-	if !vals.Exists() {
-		vals = p.Get("values.root_module")
-	}
+	priorState := p.Get("prior_state.values.root_module") // used in planfile
+	plannedVals := p.Get("planned_values.root_module") // used in planfile
+	values := p.Get("values.root_module") // only used in tfstate
+
+	resources = append(resources, processValues(providerConf, priorState, conf, vars, u, true)...)
+	resources = append(resources, processValues(providerConf, plannedVals, conf, vars, u, false)...)
+	resources = append(resources, processValues(providerConf, values, conf, vars, u, true)...)
+
+	return resources, nil
+}
+
+func processValues(providerConf, vals gjson.Result, conf gjson.Result, vars gjson.Result, u map[string]*schema.UsageData, isExisting bool) []*schema.Resource {
+	resources := make([]*schema.Resource, 0)
 
 	resData := parseResourceData(providerConf, vals, conf, vars)
 
@@ -90,12 +102,12 @@ func parseJSON(j []byte, u map[string]*schema.UsageData) ([]*schema.Resource, er
 	stripDataResources(resData)
 
 	for _, d := range resData {
-		if r := createResource(d, u[d.Address]); r != nil {
+		if r := createResource(d, u[d.Address], isExisting); r != nil {
 			resources = append(resources, r)
 		}
 	}
 
-	return resources, nil
+	return resources
 }
 
 func loadUsageFileResources(u map[string]*schema.UsageData) []*schema.Resource {
@@ -105,7 +117,7 @@ func loadUsageFileResources(u map[string]*schema.UsageData) []*schema.Resource {
 		for _, t := range GetUsageOnlyResources() {
 			if strings.HasPrefix(k, fmt.Sprintf("%s.", t)) {
 				d := schema.NewResourceData(t, "global", k, map[string]string{}, gjson.Result{})
-				if r := createResource(d, v); r != nil {
+				if r := createResource(d, v, true); r != nil {
 					resources = append(resources, r)
 				}
 			}
